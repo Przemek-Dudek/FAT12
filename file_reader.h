@@ -5,13 +5,13 @@
 #include <stdint.h>
 #include <errno.h>
 
+struct disk_t {
+    FILE *f;
+    struct volume_t *opened;
+};
+
 struct volume_t {
-    struct disk_t* dysk;
-    uint8_t* FAT1;
-    uint64_t FATDir; // poczatek fata
-    uint64_t RootDir;
-    uint64_t DataDir;
-    uint64_t rootSize;
+    struct disk_t* disk;
 };
 
 struct time_godziny_t{
@@ -53,8 +53,8 @@ struct file_description_t {
 };
 
 struct file_t{
-    struct volume_t* vol_hand;
-    struct cluster_t* clus_hand;
+    struct volume_t* vol;
+    struct cluster_t* clus;
     struct file_description_t description;
     uint16_t cluster_number;
     uint16_t file_position;
