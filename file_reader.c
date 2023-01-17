@@ -250,7 +250,7 @@ struct file_t* file_open(struct volume_t* pvolume, const char* file_name)
             tmp[j] = '\0';
         }
 
-        for(int j = 0; j < (int)strlen(entry->name); j++) {
+        for(int j = 0; j < (int)strlen(entry->name) && j < 8; j++) {
             if(!is_valid(*(entry->name + j))) {
                 break;
             }
@@ -355,6 +355,8 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
         }
     }
 
+    free(fat1_data);
+
     char *char_buff = calloc(stream->vol->SuperSector->sectors_per_cluster*512, sizeof(char)); //(uint16_t*)ptr + (i*stream->vol->SuperSector->sectors_per_cluster)*512
 
     for(int i = 0; table[i] != 0; i++) {
@@ -364,10 +366,9 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
 
         for(int j = 0; j < stream->vol->SuperSector->sectors_per_cluster*512; j++) {
             if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size) {
-                free(fat1_data);
                 free(buffer);
                 free(char_buff);
-                return nmemb*size;
+                return j + i*stream->vol->SuperSector->sectors_per_cluster*512;
             }
 
             *((char*)ptr+j+i*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j);
