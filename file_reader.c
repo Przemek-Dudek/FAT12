@@ -279,6 +279,7 @@ struct file_t* file_open(struct volume_t* pvolume, const char* file_name)
 
 
     file->entry = entry;
+    file->file_pos = 0;
 
     return file;
 }
@@ -365,13 +366,18 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
         }
 
         for(int j = 0; j < stream->vol->SuperSector->sectors_per_cluster*512; j++) {
-            if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size) {
+            if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size || (size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= stream->entry->file_size) {
                 free(buffer);
                 free(char_buff);
+                stream->file_pos += j + i*stream->vol->SuperSector->sectors_per_cluster*512;
                 return j + i*stream->vol->SuperSector->sectors_per_cluster*512;
             }
 
-            *((char*)ptr+j+i*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j);
+            /*if(stream->file_pos % stream->vol->SuperSector->sectors_per_cluster*512 == 0 && stream->file_pos != 0) {
+                break;
+            }*/
+
+            *((char*)ptr+j+i*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j+(stream->file_pos % (stream->vol->SuperSector->sectors_per_cluster*512)));
         }
     }
 

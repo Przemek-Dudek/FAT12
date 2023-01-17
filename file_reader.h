@@ -73,6 +73,8 @@ struct file_t{
     struct cluster_t* clus;
     struct fat_entry_t *entry;
 
+    int file_pos;
+
     char *buff;
 };
 
