@@ -72,8 +72,8 @@ struct file_t{
     struct volume_t* vol;
     struct cluster_t* clus;
     struct fat_entry_t *entry;
-    uint16_t cluster_number;
-    uint16_t file_position;
+
+    char *buff;
 };
 
 struct dir_t {

@@ -182,7 +182,13 @@ int fat_close(struct volume_t* pvolume)
         return -1;
     }
 
+    if(pvolume->SuperSector) {
+        free(pvolume->SuperSector);
+        pvolume->SuperSector = NULL;
+    }
+
     free(pvolume);
+    pvolume = NULL;
 
     return 0;
 }
@@ -222,6 +228,8 @@ struct file_t* file_open(struct volume_t* pvolume, const char* file_name)
         errno = ENOMEM;
         return NULL;
     }
+
+    file->buff = buff;
 
     if(disk_read(file->vol->disk, (uint16_t)(pvolume->FAT2_Pos + pvolume->FAT_sectors), buff, file->vol->ROOT_Sectors) == -1) {
         free(file);
@@ -282,15 +290,34 @@ int file_close(struct file_t* stream)
         return -1;
     }
 
-    if(stream->entry != NULL) {
-        free(stream->entry);
-    }
+    free(stream->buff);
 
     free(stream);
 
     return 0;
 }
 
+uint16_t *fat16_from12(uint8_t *fat12, size_t size)
+{
+    uint16_t *res = calloc(size, sizeof(uint16_t));
+    if(!res) {
+        return NULL;
+    }
+
+    for(size_t i = 0, j = 0; i < size;) {
+        uint8_t a = fat12[i++];
+        uint8_t b = fat12[i++];
+        uint8_t c = fat12[i++];
+
+        int first = ((b & 0x0F) << 8) | a;
+        int second = (b >> 4) | (c << 4);
+
+        res[j++] = first;
+        res[j++] = second;
+    }
+
+    return res;
+}
 
 size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
 {
@@ -298,37 +325,24 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
         return -1;
     }
 
-    uint16_t *buffer = (uint16_t*)malloc((stream->vol->number_of_cluster_per_volume + 2) * sizeof(int));
-    if(buffer == NULL) {
-        errno = ENOMEM;
-        return -1;
-    }
-
-    int *fat1_data = calloc(stream->vol->SuperSector->sectors_per_fat*stream->vol->SuperSector->bytes_per_sector, 1);
+    uint8_t *fat1_data = calloc(stream->vol->SuperSector->sectors_per_fat*stream->vol->SuperSector->bytes_per_sector+1, 1);
     if(fat1_data == NULL) {
-        free(buffer);
         errno = ENOMEM;
         return -1;
     }
 
     if(disk_read(stream->vol->disk, stream->vol->FAT1_Pos, fat1_data, stream->vol->SuperSector->sectors_per_fat) == -1) {
-        free(buffer);
         free(fat1_data);
         return -1;
     }
 
-    for(int i = 0, j = 0; i < stream->vol->number_of_cluster_per_volume + 2; i += 2, j += 3) {
-        uint8_t b1 = fat1_data[j];
-        uint8_t b2 = fat1_data[j + 1];
-        uint8_t b3 = fat1_data[j + 2];
-
-        int c1 = ((b2 & 0x0F) << 8) | b1;
-        int c2 = ((b2 & 0xF0) >> 4) | (b3 << 4);
-        buffer[i] = c1;
-        buffer[i + 1] = c2;
+    uint16_t *buffer = fat16_from12(fat1_data, stream->vol->SuperSector->sectors_per_fat*stream->vol->SuperSector->bytes_per_sector*3/2);
+    if(buffer == NULL) {
+        errno = ENOMEM;
+        return -1;
     }
 
-    uint16_t table[512];
+    uint16_t table[512] = {0};
 
     uint16_t val = stream->entry->low_cluster_index;
 
@@ -336,14 +350,33 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
         table[i] = val;
         val = buffer[val];
 
-        if(disk_read(stream->vol->disk, (table[i] - 2) * stream->vol->SuperSector->sectors_per_cluster + stream->vol->DATA_Pos, (char*)ptr + i * stream->vol->SuperSector->sectors_per_cluster, stream->vol->SuperSector->sectors_per_cluster) == -1) {
-            return -1;
+        if(table[i] == 0) {
+            break;
         }
     }
 
+    char *char_buff = calloc(stream->vol->SuperSector->sectors_per_cluster*512, sizeof(char)); //(uint16_t*)ptr + (i*stream->vol->SuperSector->sectors_per_cluster)*512
 
+    for(int i = 0; table[i] != 0; i++) {
+        if(disk_read(stream->vol->disk, (table[i] - 2) * stream->vol->SuperSector->sectors_per_cluster + stream->vol->DATA_Pos, char_buff, stream->vol->SuperSector->sectors_per_cluster) == -1) {
+            return -1;
+        }
 
+        for(int j = 0; j < stream->vol->SuperSector->sectors_per_cluster*512; j++) {
+            if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size) {
+                free(fat1_data);
+                free(buffer);
+                free(char_buff);
+                return nmemb*size;
+            }
 
+            *((char*)ptr+j+i*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j);
+        }
+    }
+
+    free(fat1_data);
+    free(buffer);
+    free(char_buff);
 
     return nmemb*size;
 }
