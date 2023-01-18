@@ -326,6 +326,10 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
         return -1;
     }
 
+    if((uint32_t)stream->file_pos >= stream->entry->file_size) {
+        return 0;
+    }
+
     uint8_t *fat1_data = calloc(stream->vol->SuperSector->sectors_per_fat*stream->vol->SuperSector->bytes_per_sector+1, 1);
     if(fat1_data == NULL) {
         errno = ENOMEM;
@@ -361,23 +365,34 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
     char *char_buff = calloc(stream->vol->SuperSector->sectors_per_cluster*512, sizeof(char)); //(uint16_t*)ptr + (i*stream->vol->SuperSector->sectors_per_cluster)*512
 
     for(int i = 0; table[i] != 0; i++) {
+        int check_pos = stream->file_pos;
+        int flag = 0;
+
+        while(check_pos >= stream->vol->SuperSector->sectors_per_cluster*512) {
+            i++;
+            flag++;
+            check_pos -= stream->vol->SuperSector->sectors_per_cluster*512;
+        }
+
         if(disk_read(stream->vol->disk, (table[i] - 2) * stream->vol->SuperSector->sectors_per_cluster + stream->vol->DATA_Pos, char_buff, stream->vol->SuperSector->sectors_per_cluster) == -1) {
             return -1;
         }
 
         for(int j = 0; j < stream->vol->SuperSector->sectors_per_cluster*512; j++) {
-            if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size || (size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= stream->entry->file_size) {
+            if((size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= nmemb*size + flag*stream->vol->SuperSector->sectors_per_cluster*512 || (size_t)(j + i*stream->vol->SuperSector->sectors_per_cluster*512) >= stream->entry->file_size) {
                 free(buffer);
                 free(char_buff);
+
+                if((int)(nmemb*size) < (int)(j + i*stream->vol->SuperSector->sectors_per_cluster*512)) {
+                    stream->file_pos += nmemb*size;
+                    return nmemb*size;
+                }
+
                 stream->file_pos += j + i*stream->vol->SuperSector->sectors_per_cluster*512;
                 return j + i*stream->vol->SuperSector->sectors_per_cluster*512;
             }
 
-            /*if(stream->file_pos % stream->vol->SuperSector->sectors_per_cluster*512 == 0 && stream->file_pos != 0) {
-                break;
-            }*/
-
-            *((char*)ptr+j+i*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j+(stream->file_pos % (stream->vol->SuperSector->sectors_per_cluster*512)));
+            *((char*)ptr+j+(i-flag)*stream->vol->SuperSector->sectors_per_cluster*512) = *(char_buff+j+(stream->file_pos % (stream->vol->SuperSector->sectors_per_cluster*512)));
         }
     }
 
