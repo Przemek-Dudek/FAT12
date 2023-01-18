@@ -19,6 +19,7 @@ struct disk_t* disk_open_from_file(const char* volume_file_name)
     struct disk_t *disk = calloc(1, sizeof(struct disk_t));
     if(disk == NULL) {
         errno = ENOMEM;
+        fclose(f);
         return NULL;
     }
 
@@ -83,6 +84,11 @@ int checkSuperSector(struct fat_super_t *superSector)
 int fat_compare(struct volume_t *volume, struct disk_t* pdisk, uint32_t first_sector)
 {
     char buff_FAT1[512], buff_FAT2[512];
+
+    for(int i = 0; i < 512; i++) {
+        buff_FAT1[i] = '\0';
+        buff_FAT2[i] = '\0';
+    }
 
     for(int i = 0; i < volume->FAT_sectors; i++) {
         if(disk_read(pdisk, first_sector + volume->FAT1_Pos + i, buff_FAT1, 1) == -1) {
@@ -188,7 +194,6 @@ int fat_close(struct volume_t* pvolume)
     }
 
     free(pvolume);
-    pvolume = NULL;
 
     return 0;
 }
@@ -296,6 +301,7 @@ struct file_t* file_open(struct volume_t* pvolume, const char* file_name)
 int file_close(struct file_t* stream)
 {
     if(stream == NULL) {
+        errno = EFAULT;
         return -1;
     }
 
@@ -331,6 +337,7 @@ uint16_t *fat16_from12(uint8_t *fat12, size_t size)
 size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
 {
     if(ptr == NULL || size == 0 || nmemb == 0 || stream == NULL) {
+        errno = EFAULT;
         return -1;
     }
 
@@ -346,6 +353,7 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
 
     if(disk_read(stream->vol->disk, stream->vol->FAT1_Pos, fat1_data, stream->vol->SuperSector->sectors_per_fat) == -1) {
         free(fat1_data);
+        errno = ENXIO;
         return -1;
     }
 
@@ -371,7 +379,7 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
     free(buffer);
     free(fat1_data);
 
-    char *char_buff = calloc(stream->vol->SuperSector->sectors_per_cluster*512, sizeof(char)); //(uint16_t*)ptr + (i*stream->vol->SuperSector->sectors_per_cluster)*512
+    char *char_buff = calloc(stream->vol->SuperSector->sectors_per_cluster*512, sizeof(char));
 
     for(int i = 0; table[i] != 0; i++) {
         int check_pos = stream->file_pos;
@@ -411,7 +419,7 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
                     free(char_buff);
                     return 0;
                 }
-                //stream->file_pos += j;
+
                 j2=0;
                 flag2 = 1;
                 flag++;
@@ -484,16 +492,17 @@ struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path)
         return NULL;
     }
 
-    if(disk_read(pvolume->disk, pvolume->ROOT_Dir_Pos, buff, pvolume->ROOT_Sectors) == -1) {
-        errno = EISDIR;
-        free(buff);
-        return NULL;
-    }
-
     struct dir_t *dir = calloc(1, sizeof(struct dir_t));
     if(dir == NULL) {
         errno = ENOMEM;
         free(buff);
+        return NULL;
+    }
+
+    if(disk_read(pvolume->disk, pvolume->ROOT_Dir_Pos, buff, pvolume->ROOT_Sectors) == -1) {
+        errno = EISDIR;
+        free(buff);
+        free(dir);
         return NULL;
     }
 
@@ -524,23 +533,20 @@ struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path)
             return NULL;
         }
 
-        if(strncmp(entry->name,dir_path, in) == 0)
-        {
-            if(*(dir_path + in) == '.')
-            {
-                if(entry->file_size == 0)
+        if(strncmp(entry->name, dir_path, in) == 0) {
+            if(*(dir_path + in) == '.') {
+                if(entry->file_size == 0) {
                     break;
+                }
             }
-            else
-                break;
+
+            break;
         }
         dir->dir_position += 32;
     }while(1);
 
     if(dir->dir_position == 0 && strcmp(dir_path,"\\") == 0) {
         dir->dir_position = 0;
-    } else {
-        dir->dir_position = dir->dir_position;
     }
 
     dir->is_file_open = 0;
@@ -555,11 +561,11 @@ struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path)
 unsigned int validate(const char *string, unsigned int n)
 {
     for (unsigned int i = 0; i < n; ++i) {
-        if(!is_valid(*(string + i)))
-        {
+        if(!is_valid(*(string + i))) {
             return i;
         }
     }
+
     return n;
 }
 
@@ -591,16 +597,16 @@ int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
             return 1;
         }
 
+        int j1, el = 0;
+
         for(int i = 0; i < 13; i++) {
             pentry->name[i] = '\0';
         }
 
         if(*(char*)entry == -27) {
-            pdir->dir_position+=32;
+            pdir->dir_position += 32;
             continue;
         }
-
-        int j1;
 
         for (j1 = 0; j1 < 8; ++j1) {
             if(entry->name[j1] == ' '){
@@ -609,12 +615,9 @@ int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
             }
         }
 
-        int el = 0;
-
         for (int k = 0; k < 3; k++, el++) {
-            if(entry->extenstion[k] == ' '){
+            if(entry->extenstion[k] == ' ') {
                 entry->extenstion[k] = 0;
-
                 break;
             }
         }
@@ -625,7 +628,7 @@ int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
         int ide = validate(entry->extenstion, 2);
 
         if(ide > 0) {
-            strncpy(pentry->name + idn + 1,entry->extenstion, el);
+            strncpy(pentry->name + idn + 1, entry->extenstion, el);
             pentry->name[idn] = '.';
         }
 
@@ -639,7 +642,7 @@ int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
         return 1;
     }
 
-    for (int i = 4; entry->attributes > 0 ; i--) {
+    for (int i = 4; entry->attributes > 0; i--) {
         switch (i) {
             case 0:
                 if(entry->attributes >= 1) {
@@ -691,7 +694,6 @@ int dir_close(struct dir_t* pdir)
     }
 
     free(pdir);
-    pdir = NULL;
 
     return 0;
 }
