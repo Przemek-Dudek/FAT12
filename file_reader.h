@@ -79,23 +79,24 @@ struct file_t{
 };
 
 struct dir_t {
-    struct volume_t* vol_hand;
+    struct volume_t* vol;
     uint16_t dir_position;
-};
-
-struct cluster_t {
-    uint16_t* handle;
-    size_t size;
+    int is_file_open;
 };
 
 struct dir_entry_t {
-    char *name;
+    char name[13];
     int size;
     int is_archived;
     int is_readonly;
     int is_system;
     int is_hidden;
     int is_directory;
+};
+
+struct cluster_t {
+    uint16_t* handle;
+    size_t size;
 };
 
 struct fat_super_t {

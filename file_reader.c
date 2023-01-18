@@ -474,18 +474,202 @@ int32_t file_seek(struct file_t* stream, int32_t offset, int whence)
 struct dir_t* dir_open(struct volume_t* pvolume, const char* dir_path)
 {
     if(pvolume == NULL || dir_path == NULL) {
+        errno = EFAULT;
         return NULL;
     }
 
-    return NULL;
+    char *buff = calloc(pvolume->ROOT_Sectors, 512);
+    if(buff == NULL) {
+        errno = ENOMEM;
+        return NULL;
+    }
+
+    if(disk_read(pvolume->disk, pvolume->ROOT_Dir_Pos, buff, pvolume->ROOT_Sectors) == -1) {
+        errno = EISDIR;
+        free(buff);
+        return NULL;
+    }
+
+    struct dir_t *dir = calloc(1, sizeof(struct dir_t));
+    if(dir == NULL) {
+        errno = ENOMEM;
+        free(buff);
+        return NULL;
+    }
+
+    struct fat_entry_t *entry;
+
+    int in = 0;
+    for (in = 0; in < (int)strlen(dir_path); in++) {
+        if(!is_valid(*(dir_path+in))) {
+            break;
+        }
+    }
+
+    do {
+        if(in == 0) {
+            break;
+        }
+
+        if(dir->dir_position >= pvolume->ROOT_Sectors*512) {
+            break;
+        }
+
+        entry = (struct fat_entry_t*)(buff + dir->dir_position);
+
+        if(entry->file_size != 0) {
+            errno = ENOTDIR;
+            free(buff);
+            free(dir);
+            return NULL;
+        }
+
+        if(strncmp(entry->name,dir_path, in) == 0)
+        {
+            if(*(dir_path + in) == '.')
+            {
+                if(entry->file_size == 0)
+                    break;
+            }
+            else
+                break;
+        }
+        dir->dir_position += 32;
+    }while(1);
+
+    if(dir->dir_position == 0 && strcmp(dir_path,"\\") == 0) {
+        dir->dir_position = 0;
+    } else {
+        dir->dir_position = dir->dir_position;
+    }
+
+    dir->is_file_open = 0;
+    dir->vol = pvolume;
+
+    free(buff);
+
+    return dir;
 }
 
 
+unsigned int validate(const char *string, unsigned int n)
+{
+    for (unsigned int i = 0; i < n; ++i) {
+        if(!is_valid(*(string + i)))
+        {
+            return i;
+        }
+    }
+    return n;
+}
+
 int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
 {
-    if(pdir == NULL || pentry == NULL) {
+    char *temp = calloc(pdir->vol->ROOT_Sectors,512);
+    if(temp == NULL) {
+        errno = ENOMEM;
         return -1;
     }
+
+    if(disk_read(pdir->vol->disk, (uint16_t)(pdir->vol->FAT2_Pos + pdir->vol->SuperSector->sectors_per_fat), temp, (uint16_t)pdir->vol->ROOT_Sectors) == -1) {
+        errno = EISDIR;
+        free(temp);
+        return -1;
+    }
+
+    struct fat_entry_t *entry;
+    int flag = 0;
+
+    do {
+        if(pdir->dir_position>=pdir->vol->ROOT_Sectors * 512) {
+            break;
+        }
+
+        entry = (struct fat_entry_t*)(temp + pdir->dir_position);
+        if(*(char*)entry == 0) {
+            free(temp);
+            return 1;
+        }
+
+        for(int i = 0; i < 13; i++) {
+            pentry->name[i] = '\0';
+        }
+
+        if(*(char*)entry == -27) {
+            pdir->dir_position+=32;
+            continue;
+        }
+
+        int j1;
+
+        for (j1 = 0; j1 < 8; ++j1) {
+            if(entry->name[j1] == ' '){
+                entry->name[j1] = 0;
+                break;
+            }
+        }
+
+        int el = 0;
+
+        for (int k = 0; k < 3; k++, el++) {
+            if(entry->extenstion[k] == ' '){
+                entry->extenstion[k] = 0;
+
+                break;
+            }
+        }
+
+        strncpy(pentry->name, entry->name, j1);
+
+        int idn = validate(entry->name, 8);
+        int ide = validate(entry->extenstion, 2);
+
+        if(ide > 0) {
+            strncpy(pentry->name + idn + 1,entry->extenstion, el);
+            pentry->name[idn] = '.';
+        }
+
+        pdir->dir_position += 32;
+        flag = 1;
+        break;
+    } while(1);
+
+    if(pdir->dir_position >= pdir->vol->ROOT_Sectors * 512 || flag == 0) {
+        free(temp);
+        return 1;
+    }
+
+    for (int i = 4; entry->attributes > 0 ; i--) {
+        switch (i) {
+            case 0:
+                if(entry->attributes >= 1) {
+                    pentry->is_readonly = 1;
+                    entry->attributes--;
+                }
+                break;
+
+            case 1:
+                if(entry->attributes >= 2) {
+                    pentry->is_hidden = 1;
+                    entry->attributes -= 2;
+                }
+                break;
+
+            case 2:
+                if(entry->attributes >= 16) {
+                    pentry->is
+                }
+                break;
+
+            case 3:
+                if(entry->attributes >= 32) {
+
+                }
+                break;
+        }
+    }
+
+    free(temp);
 
     return 0;
 }
@@ -496,6 +680,9 @@ int dir_close(struct dir_t* pdir)
     if(pdir == NULL) {
         return -1;
     }
+
+    free(pdir);
+    pdir = NULL;
 
     return 0;
 }
