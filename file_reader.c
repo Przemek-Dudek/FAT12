@@ -281,6 +281,14 @@ struct file_t* file_open(struct volume_t* pvolume, const char* file_name)
     file->entry = entry;
     file->file_pos = 0;
 
+    if(entry->file_size == 0) {
+        free(buff);
+        free(file);
+
+        errno = EISDIR;
+        return NULL;
+    }
+
     return file;
 }
 
@@ -425,8 +433,37 @@ size_t file_read(void *ptr, size_t size, size_t nmemb, struct file_t *stream)
 
 int32_t file_seek(struct file_t* stream, int32_t offset, int whence)
 {
-    if(stream == NULL || offset == 0 || whence == 0) {
+    if(stream == NULL) {
+        errno = EFAULT;
         return -1;
+    }
+
+    if((offset > 0 && whence == 2) || (offset < 0 && whence == 0)) {
+        errno = ENXIO;
+        return -1;
+    }
+
+    if((offset + stream->file_pos > (int)stream->entry->file_size || offset + stream->file_pos < 0) && whence == 1) {
+        errno = ENXIO;
+        return -1;
+    }
+
+    switch (whence) {
+        case 0:
+            stream->file_pos = offset;
+            break;
+
+        case 1:
+            stream->file_pos += offset;
+            break;
+
+        case 2:
+            stream->file_pos = stream->entry->file_size + offset;
+            break;
+
+        default:
+            errno = EINVAL;
+            return -1;
     }
 
     return 0;
