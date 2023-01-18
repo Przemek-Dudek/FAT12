@@ -656,14 +656,23 @@ int dir_read(struct dir_t* pdir, struct dir_entry_t* pentry)
                 break;
 
             case 2:
-                if(entry->attributes >= 16) {
-                    pentry->is
+                if(entry->attributes >= 4) {
+                    pentry->is_system = 1;
+                    entry->attributes -= 4;
                 }
                 break;
 
             case 3:
-                if(entry->attributes >= 32) {
+                if(entry->attributes >= 16) {
+                    pentry->is_directory = 1;
+                    entry->attributes -= 16;
+                }
+                break;
 
+            case 4:
+                if(entry->attributes >= 32) {
+                    pentry->is_archived = 1;
+                    entry->attributes -= 32;
                 }
                 break;
         }
